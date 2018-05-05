@@ -1,53 +1,39 @@
-/* Copyright (c) 2012 Martin Ridgers
- * 
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+// Copyright (c) 2012 Martin Ridgers
+// License: http://opensource.org/licenses/MIT
 
-#ifndef CONFIG_H
-#define CONFIG_H
+#pragma once
 
+#include <conio.h>
+#include <io.h>
+#include <limits.h>
+#include <process.h>
 #include <stdio.h>
-#include <wchar.h>
 #include <stdlib.h>
 #include <sys/stat.h>
-#include <io.h>
-#include <conio.h>
-#include <process.h>
-#include <limits.h>
+#include <wchar.h>
 
 #include "hooks.h"
 
-// here be dragons (for purposes of utf-8 and changing stdout handles)
+// here be dragons (for purposes of utf-8 and capturing stdio)
 //
-int                         hooked_fwrite(const void*, int, int, void*);
-void                        hooked_fprintf(const void*, const char*, ...);
-int                         hooked_putc(int, void*);
-size_t                      hooked_mbrtowc(wchar_t*, const char*, size_t, mbstate_t*);
-size_t                      hooked_mbrlen(const char*, size_t, mbstate_t*);
-int                         hooked_stat(const char*, struct hooked_stat*);
-int                         hooked_fstat(int, struct hooked_stat*);
-int                         hooked_wcwidth(wchar_t wc);
+//
+int     hooked_fwrite(const void*, int, int, FILE*);
+void    hooked_fprintf(FILE*, const char*, ...);
+int     hooked_putc(int, FILE*);
+void    hooked_fflush(FILE*);
+int     hooked_fileno(FILE*);
+size_t  hooked_mbrtowc(wchar_t*, const char*, size_t, mbstate_t*);
+size_t  hooked_mbrlen(const char*, size_t, mbstate_t*);
+int     hooked_stat(const char*, struct hooked_stat*);
+int     hooked_fstat(int, struct hooked_stat*);
+int     wcwidth(wchar_t);
 
 #if defined(__MINGW32__)
 #   undef fwrite
 #   undef fprintf
 #   undef putc
+#   undef fflush
+#   undef fileno
 #   undef mbrtowc
 #   undef mbrlen
 #   undef stat
@@ -61,10 +47,11 @@ int                         hooked_wcwidth(wchar_t wc);
 #endif
 
 #if defined(BUILD_READLINE)
-#   define wcwidth(x)       (((x) > 0x7f) ? hooked_wcwidth(x) : 1)
 #   define fwrite           hooked_fwrite
 #   define fprintf          hooked_fprintf
 #   define putc             hooked_putc
+#   define fflush           hooked_fflush
+#   define fileno           hooked_fileno
 #   define mbrtowc          hooked_mbrtowc
 #   define mbrlen           hooked_mbrlen
 #   define stat             hooked_stat
@@ -72,7 +59,7 @@ int                         hooked_wcwidth(wchar_t wc);
 #endif // BUILD_READLINE
 
 #undef MB_CUR_MAX
-#define MB_CUR_MAX  3       // utf-8 takes 3 bytes to encode 16 bits.
+#define MB_CUR_MAX  4       // 4-bytes is enough for the Unicode standard.
 
 // msvc vs posix|readline|gnu
 //
@@ -156,7 +143,3 @@ int                         hooked_wcwidth(wchar_t wc);
 #    define USE_VARARGS
 #  endif
 #endif
-
-#endif // CONFIG_H
-
-// vim: expandtab
