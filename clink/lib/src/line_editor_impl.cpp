@@ -113,7 +113,7 @@ void line_editor_impl::begin_line()
     line_state line = get_linestate();
     editor_module::context context = get_context(line);
     for (auto module : m_modules)
-        module->on_begin_line(m_desc.prompt, context);
+        module->on_begin_line(context);
 }
 
 //------------------------------------------------------------------------------
@@ -402,7 +402,8 @@ void line_editor_impl::accept_match(unsigned int index)
     const char* buf_ptr = m_buffer.get_buffer();
 
     str<288> to_insert;
-    to_insert.concat(buf_ptr + word_start, end_word.length);
+    if (!m_matches.is_prefix_included())
+        to_insert.concat(buf_ptr + word_start, end_word.length);
     to_insert << match;
 
     // TODO: This has not place here and should be done somewhere else.
@@ -537,7 +538,7 @@ editor_module::context line_editor_impl::get_context(const line_state& line) con
 {
     auto& buffer = const_cast<rl_buffer&>(m_buffer);
     auto& pter = const_cast<printer&>(m_printer);
-    return { pter, buffer, line, m_matches };
+    return { m_desc.prompt, pter, buffer, line, m_matches };
 }
 
 //------------------------------------------------------------------------------

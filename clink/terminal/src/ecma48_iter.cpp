@@ -19,12 +19,12 @@ unsigned int cell_count(const char* in)
 
     ecma48_state state;
     ecma48_iter iter(in, state);
-    while (const auto* code = iter.next())
+    while (const ecma48_code& code = iter.next())
     {
-        if (code->get_type() != ecma48_code::type_chars)
+        if (code.get_type() != ecma48_code::type_chars)
             continue;
 
-        str_iter inner_iter(code->get_pointer(), code->get_length());
+        str_iter inner_iter(code.get_pointer(), code.get_length());
         while (int c = inner_iter.next())
             count += wcwidth(c);
     }
@@ -56,10 +56,10 @@ enum
 
 
 //------------------------------------------------------------------------------
-int ecma48_code::decode_csi(int& final, int* params, unsigned int max_params) const
+bool ecma48_code::decode_csi(csi_base& base, int* params, unsigned int max_params) const
 {
     if (get_type() != type_c1 || get_code() != c1_csi)
-        return -1;
+        return false;
 
     /* CSI P ... P I .... I F */
     str_iter iter(get_pointer(), get_length());
@@ -68,13 +68,13 @@ int ecma48_code::decode_csi(int& final, int* params, unsigned int max_params) co
     if (iter.next() == 0x1b)
         iter.next();
 
-    // Reserved? Then skip all Ps
-    if (in_range(iter.peek(), 0x3c, 0x3f))
-        while (in_range(iter.peek(), 0x30, 0x3f))
-            iter.next();
+    // Is the parameter string tagged as private/experimental?
+    if (base.private_use = in_range(iter.peek(), 0x3c, 0x3f))
+        iter.next();
 
     // Extract parameters.
-    final = 0;
+    base.intermediate = 0;
+    base.final = 0;
     int param = 0;
     unsigned int count = 0;
     bool trailing_param = false;
@@ -94,15 +94,18 @@ int ecma48_code::decode_csi(int& final, int* params, unsigned int max_params) co
             else if (c != 0x3a) // Blissfully gloss over ':' part of spec.
                 param = (param * 10) + (c - 0x30);
         }
-        else
-            final = (final << 8) + c;
+        else if (in_range(c, 0x20, 0x2f))
+            base.intermediate = char(c);
+        else if (!in_range(c, 0x3c, 0x3f))
+            base.final = char(c);
     }
 
     if (trailing_param)
         if (count < max_params)
             params[count++] = param;
-    
-    return count;
+
+    base.param_count = char(count);
+    return true;
 }
 
 //------------------------------------------------------------------------------
@@ -124,7 +127,7 @@ bool ecma48_code::get_c1_str(str_base& out) const
     {
         if (c == 0x9c || c == 0x1b)
             break;
-        
+
         iter.next();
     }
 
@@ -144,7 +147,7 @@ ecma48_iter::ecma48_iter(const char* s, ecma48_state& state, int len)
 }
 
 //------------------------------------------------------------------------------
-const ecma48_code* ecma48_iter::next()
+const ecma48_code& ecma48_iter::next()
 {
     m_code.m_str = m_iter.get_pointer();
 
@@ -156,9 +159,12 @@ const ecma48_code* ecma48_iter::next()
         if (!c)
         {
             if (m_state.state != ecma48_state_char)
-                return nullptr;
-            else
-                break;
+            {
+                m_code.m_length = 0;
+                return m_code;
+            }
+
+            break;
         }
 
         switch (m_state.state)
@@ -196,7 +202,7 @@ const ecma48_code* ecma48_iter::next()
 
     m_state.reset();
 
-    return (m_code.get_length() != 0) ? &m_code : nullptr;
+    return m_code;
 }
 
 //------------------------------------------------------------------------------

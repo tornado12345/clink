@@ -3,6 +3,7 @@
 
 #include "pch.h"
 #include "rl_module.h"
+#include "line_buffer.h"
 
 #include <core/base.h>
 #include <core/log.h>
@@ -19,6 +20,8 @@ extern "C" {
 //------------------------------------------------------------------------------
 static FILE*        null_stream = (FILE*)1;
 void                show_rl_help(printer&);
+extern "C" int      wcwidth(int);
+extern "C" char*    tgetstr(char*, char**);
 static const int    RL_MORE_INPUT_STATES = ~(
                         RL_STATE_CALLBACK|
                         RL_STATE_INITIALIZED|
@@ -175,7 +178,7 @@ void rl_module::bind_input(binder& binder)
 }
 
 //------------------------------------------------------------------------------
-void rl_module::on_begin_line(const char* prompt, const context& context)
+void rl_module::on_begin_line(const context& context)
 {
     rl_outstream = (FILE*)(terminal_out*)(&context.printer);
 
@@ -184,12 +187,12 @@ void rl_module::on_begin_line(const char* prompt, const context& context)
     str<128> rl_prompt;
 
     ecma48_state state;
-    ecma48_iter iter(prompt, state);
-    while (const ecma48_code* code = iter.next())
+    ecma48_iter iter(context.prompt, state);
+    while (const ecma48_code& code = iter.next())
     {
-        bool c1 = (code->get_type() == ecma48_code::type_c1);
+        bool c1 = (code.get_type() == ecma48_code::type_c1);
         if (c1) rl_prompt.concat("\x01", 1);
-                rl_prompt.concat(code->get_pointer(), code->get_length());
+                rl_prompt.concat(code.get_pointer(), code.get_length());
         if (c1) rl_prompt.concat("\x02", 1);
     }
 
@@ -236,9 +239,9 @@ void rl_module::on_input(const input& input, result& result, const context& cont
         virtual void end() override     {}
         virtual void select() override  {}
         virtual int  read() override    { return *(unsigned char*)(data++); }
-        const char*  data; 
+        const char*  data;
     } term_in;
-             
+
     term_in.data = input.keys;
     rl_instream = (FILE*)(&term_in);
 
@@ -294,53 +297,95 @@ void rl_module::done(const char* line)
 //------------------------------------------------------------------------------
 void rl_module::on_terminal_resize(int columns, int rows, const context& context)
 {
-#if defined(PLATFORM_WINDOWS)
-    // The gymnastics below shouldn't really be necessary. The underlying code
-    // dealing with terminals should instead take care of cursors and the like.
+#if 1
+    rl_reset_screen_size();
+    rl_redisplay();
+#else
+    static int prev_columns = columns;
 
-    CONSOLE_SCREEN_BUFFER_INFO csbi;
-    COORD cursor_pos;
-    HANDLE handle;
-    int cell_count;
-    DWORD written;
+    int remaining = prev_columns;
+    int line_count = 1;
 
-    handle = GetStdHandle(STD_OUTPUT_HANDLE);
-    GetConsoleScreenBufferInfo(handle, &csbi);
+    auto measure = [&] (const char* input, int length) {
+        ecma48_state state;
+        ecma48_iter iter(input, state, length);
+        while (const ecma48_code& code = iter.next())
+        {
+            switch (code.get_type())
+            {
+            case ecma48_code::type_chars:
+                for (str_iter i(code.get_pointer(), code.get_length()); i.more(); )
+                {
+                    int n = wcwidth(i.next());
+                    remaining -= n;
+                    if (remaining > 0)
+                        continue;
 
-    // If the new buffer size has clipped the cursor, conhost will move it down
-    // one line. Readline on the other hand thinks that the cursor's row remains
-    // unchanged.
-    cursor_pos.X = 0;
-    cursor_pos.Y = csbi.dwCursorPosition.Y;
-    if (_rl_last_c_pos >= csbi.dwSize.X && cursor_pos.Y > 0)
-        --cursor_pos.Y;
+                    ++line_count;
 
-    SetConsoleCursorPosition(handle, cursor_pos);
+                    remaining = prev_columns - ((remaining < 0) << 1);
+                }
+                break;
 
-    // Readline only clears the last row. If a resize causes a line to now occupy
-    // two or more fewer lines that it did previous it will leave display artefacts.
-    if (_rl_vis_botlin)
+            case ecma48_code::type_c0:
+                switch (code.get_code())
+                {
+                case ecma48_code::c0_lf:
+                    ++line_count;
+                    /* fallthrough */
+
+                case ecma48_code::c0_cr:
+                    remaining = prev_columns;
+                    break;
+
+                case ecma48_code::c0_ht:
+                    if (int n = 8 - ((prev_columns - remaining) & 7))
+                        remaining = max(remaining - n, 0);
+                    break;
+
+                case ecma48_code::c0_bs:
+                    remaining = min(remaining + 1, prev_columns); // doesn't consider full-width
+                    break;
+                }
+                break;
+            }
+        }
+    };
+
+    measure(context.prompt, -1);
+
+    const line_buffer& buffer = context.buffer;
+    const char* buffer_ptr = buffer.get_buffer();
+    measure(buffer_ptr, buffer.get_cursor());
+    int cursor_line = line_count - 1;
+
+    buffer_ptr += buffer.get_cursor();
+    measure(buffer_ptr, -1);
+
+    static const char* const termcap_up    = tgetstr("ku", nullptr);
+    static const char* const termcap_down  = tgetstr("kd", nullptr);
+    static const char* const termcap_cr    = tgetstr("cr", nullptr);
+    static const char* const termcap_clear = tgetstr("ce", nullptr);
+
+    auto& printer = context.printer;
+
+    // Move cursor to bottom line.
+    for (int i = line_count - cursor_line; --i;)
+        printer.print(termcap_down, 64);
+
+    printer.print(termcap_cr, 64);
+    do
     {
-        // _rl_last_v_pos is vertical offset of cursor from first line.
-        if (_rl_last_v_pos > 0)
-            cursor_pos.Y -= _rl_last_v_pos - 1; // '- 1' so we're line below first.
+        printer.print(termcap_clear, 64);
 
-        cell_count = csbi.dwSize.X * _rl_vis_botlin;
-
-        FillConsoleOutputCharacterW(handle, ' ', cell_count, cursor_pos, &written);
-        FillConsoleOutputAttribute(handle, csbi.wAttributes, cell_count, cursor_pos,
-            &written);
+        if (--line_count)
+            printer.print(termcap_up, 64);
     }
+    while (line_count);
 
-    // Tell Readline the buffer's resized, but make sure we don't use Clink's
-    // redisplay path as then Readline won't redisplay multiline prompts correctly.
-    {
-        rl_voidfunc_t* old_redisplay = rl_redisplay_function;
-        rl_redisplay_function = rl_redisplay;
+    printer.print(context.prompt, 1024);
+    printer.print(buffer.get_buffer(), 1024);
 
-        rl_resize_terminal();
-
-        rl_redisplay_function = old_redisplay;
-    }
-#endif // PLATFORM_WINDOWS
+    prev_columns = columns;
+#endif
 }

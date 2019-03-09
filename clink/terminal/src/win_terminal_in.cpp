@@ -7,6 +7,8 @@
 #include <core/base.h>
 #include <core/str.h>
 
+#include <Windows.h>
+
 //------------------------------------------------------------------------------
 #define CSI(x) "\x1b[" #x
 #define SS3(x) "\x1bO" #x
@@ -77,6 +79,26 @@ static void set_cursor_visibility(bool state)
     GetConsoleCursorInfo(handle, &info);
     info.bVisible = BOOL(state);
     SetConsoleCursorInfo(handle, &info);
+}
+
+//------------------------------------------------------------------------------
+static void adjust_cursor_on_resize(COORD prev_position)
+{
+    // Windows will move the cursor onto a new line when it gets clipped on
+    // buffer resize. Other terminals clamp along the X axis.
+
+    HANDLE handle = GetStdHandle(STD_OUTPUT_HANDLE);
+
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    GetConsoleScreenBufferInfo(handle , &csbi);
+    if (prev_position.X < csbi.dwSize.X)
+        return;
+
+    COORD fix_position = {
+        short(csbi.dwSize.X - 1),
+        short(csbi.dwCursorPosition.Y - 1)
+    };
+    SetConsoleCursorPosition(handle, fix_position);
 }
 
 
@@ -201,6 +223,9 @@ void win_terminal_in::read_console()
             break;
 
         case WINDOW_BUFFER_SIZE_EVENT:
+            // Windows will move the cursor onto a new line when it gets clipped
+            // on buffer resize. Other terminals
+            adjust_cursor_on_resize(csbi.dwCursorPosition);
             return;
         }
     }

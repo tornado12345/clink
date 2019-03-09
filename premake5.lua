@@ -139,6 +139,7 @@ project("readline")
 
     excludes("readline/readline/emacs_keymap.c")
     excludes("readline/readline/vi_keymap.c")
+    excludes("readline/readline/support/wcwidth.c")
 
 --------------------------------------------------------------------------------
 project("getopt")
@@ -318,17 +319,6 @@ clink_exe("clink_test")
     configuration("vs*")
         pchheader("pch.h")
         pchsource("clink/test/src/pch.cpp")
-
---------------------------------------------------------------------------------
-if _ACTION:sub(1,2) == "vs" then
-    project("_run")
-        kind("none")
-        files("premake5.lua")
-        files("docs/**")
-
-        debugcommand("cmd.exe")
-        debugargs("/k call bin\\$(configuration)\\clink.bat inject")
-end
 
 --------------------------------------------------------------------------------
 dofile("docs/premake5.lua")

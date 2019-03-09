@@ -14,8 +14,8 @@
 static setting_bool g_enhanced_doskey(
     "doskey.enhanced",
     "Add enhancements to Doskey",
-    "Enhanced Doskey adds the expansion of macros that follow '|' and '&' "
-    "command separators and respects quotes around words when parsing $1...9 "
+    "Enhanced Doskey adds the expansion of macros that follow '|' and '&'\n"
+    "command separators and respects quotes around words when parsing $1...9\n"
     "tags. Note that these features do not apply to Doskey use in Batch files.",
     true);
 
@@ -99,7 +99,6 @@ void wstr_stream::grow(unsigned int hint)
     hint = (hint + 127) & ~127;
     unsigned int size = int(m_end - m_start) + hint;
     TYPE* next = (TYPE*)realloc(m_start, size * sizeof(TYPE));
-    free(m_start);
     m_cursor = next + (m_cursor - m_start);
     m_end = next + size;
     m_start = next;

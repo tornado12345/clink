@@ -9,6 +9,7 @@
 class terminal_out
 {
 public:
+    virtual                 ~terminal_out() = default;
     virtual void            begin() = 0;
     virtual void            end() = 0;
     virtual void            write(const char* chars, int length) = 0;
@@ -16,7 +17,6 @@ public:
     virtual void            flush() = 0;
     virtual int             get_columns() const = 0;
     virtual int             get_rows() const = 0;
-    virtual void            set_attributes(const attributes attr) = 0;
 };
 
 //------------------------------------------------------------------------------
